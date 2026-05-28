@@ -1,4 +1,4 @@
-// File generated manually to include Windows support.
+// firebase_options.dart
 // ignore_for_file: type=lint
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'

@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'dart:io';
-import '../services/supabase_storage_service.dart';
+  import '../services/cloudinary_storage_service.dart';
 
 class CachedProdutoImage extends StatefulWidget {
   final String? imagePath;
@@ -27,7 +27,7 @@ class CachedProdutoImage extends StatefulWidget {
 }
 
 class _CachedProdutoImageState extends State<CachedProdutoImage> {
-  final _storageService = SupabaseStorageService.instance;
+  final _storageService = CloudinaryStorageService.instance;
   String? _localPath;
   bool _isLoading = true;
   bool _hasError = false;
@@ -64,7 +64,7 @@ Future<void> _loadImage() async {
 
   try {
     // 🔥 CASO 1: URL do Supabase - baixar e cachear
-    if (_storageService.isSupabaseUrl(widget.imagePath!)) {
+    if (_storageService.isRemoteUrl(widget.imagePath!)) {
       // ✅ CORRETO
 final cachedPath = await _storageService.cacheImagemLocal(widget.imagePath!);
 

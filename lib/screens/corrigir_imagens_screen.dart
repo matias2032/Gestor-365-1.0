@@ -3,7 +3,8 @@
 
 import 'package:flutter/material.dart';
 import '../services/supabase_sync_service.dart';
-import '../services/supabase_storage_service.dart'; // 🔥 NOVO
+import '../services/cloudinary_storage_service.dart'; // 🔥 NOVO
+
 
 class CorrigirImagensScreen extends StatefulWidget {
   const CorrigirImagensScreen({super.key});
@@ -40,15 +41,13 @@ class _CorrigirImagensScreenState extends State<CorrigirImagensScreen> {
       // 🔥 NOVO: Verificar configuração do Storage
       _addLog('🔍 Verificando configuração do bucket...');
       
-      final storageService = SupabaseStorageService.instance;
-      final bucketOk = await storageService.verificarConfiguracao();
-      
-      if (!bucketOk) {
-        throw Exception(
-          'Bucket não configurado corretamente.\n'
-          'Execute o SQL de correção de políticas no Supabase!'
-        );
-      }
+final storageService = CloudinaryStorageService.instance;
+if (!storageService.isConfigured) {
+  throw Exception(
+    'Cloudinary não configurado. Verifique o ficheiro .env '
+    '(CLOUDINARY_CLOUD_NAME e CLOUDINARY_UPLOAD_PRESET).'
+  );
+}
       
       _addLog('✅ Bucket configurado corretamente');
       _addLog('📤 Fazendo upload de imagens locais...');

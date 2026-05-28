@@ -12,7 +12,7 @@ import '../models/pedido.dart';
 import '../models/usuario.dart';
 import '../models/produto_imagem.dart';
 import 'package:sqflite/sqflite.dart';
-import 'supabase_storage_service.dart';
+import 'cloudinary_storage_service.dart';
 import 'estoque_alerta_service.dart';
 import 'notificacao_estoque_service.dart';
 import 'sync_events_service.dart';
@@ -73,7 +73,7 @@ class SupabaseSyncService {
   // Stream Controllers
   final _statusStreamController = StreamController<SyncStatus>.broadcast();
   final _erroStreamController = StreamController<String>.broadcast();
- final _storageService = SupabaseStorageService.instance;
+ final _storageService = CloudinaryStorageService.instance;
 
   Stream<SyncStatus> get statusStream => _statusStreamController.stream;
   Stream<String> get erroStream => _erroStreamController.stream;
@@ -427,28 +427,10 @@ dataExpiracao: data['data_expiracao'] != null
       String caminhoFinal = caminhoOriginal;
       
       // 🔥 VALIDAÇÃO: Se não for URL do Supabase, tentar baixar
-      if (!_storageService.isSupabaseUrl(caminhoOriginal)) {
-        print('⚠️ Caminho local detectado no Supabase: $caminhoOriginal');
-        
-        // Tentar criar URL pública a partir do nome do arquivo
-        final nomeArquivo = caminhoOriginal.split('/').last;
-        final urlPublica = _supabase.storage
-            .from('produtos-imagens')
-            .getPublicUrl(nomeArquivo);
-        
-        // Verificar se o arquivo existe no Storage
-        try {
-          await _supabase.storage
-              .from('produtos-imagens')
-              .download(nomeArquivo);
-          
-          caminhoFinal = urlPublica;
-          print('✅ URL pública reconstruída: $urlPublica');
-        } catch (e) {
-          print('❌ Arquivo não existe no Storage: $nomeArquivo');
-          // Manter caminho original (falhará, mas não quebra o sync)
-        }
-      }
+if (!_storageService.isRemoteUrl(caminhoOriginal)) {
+  print('⚠️ Caminho local detectado no Supabase: $caminhoOriginal');
+  // Caminho local — não há bucket para reconstruir URL; manter como está
+}
       
       imagens.add(ProdutoImagem(
         id: img['id_imagem'] as int?,
@@ -496,7 +478,7 @@ Future<void> corrigirImagensLocais() async {
         String caminhoFinal = imagem.caminho;
         
         // Se for caminho local, fazer upload
-        if (!_storageService.isSupabaseUrl(imagem.caminho)) {
+if (!_storageService.isRemoteUrl(imagem.caminho)) {
           print('📤 Fazendo upload de imagem local: ${imagem.caminho}');
           
           final urlPublica = await _storageService.uploadImagem(imagem.caminho);
@@ -877,7 +859,7 @@ Future<int> createProduto(
         
         String? caminhoFinal = imagem.caminho;
         
-        if (!_storageService.isSupabaseUrl(imagem.caminho)) {
+if (!_storageService.isRemoteUrl(imagem.caminho)) {
           final urlPublica = await _storageService.uploadImagem(imagem.caminho);
           
           if (urlPublica != null && urlPublica.isNotEmpty) {
@@ -986,7 +968,7 @@ Future<int> updateProduto(
   for (final imagem in imagens) {
     String? caminhoFinal = imagem.caminho;
     
-    if (!_storageService.isSupabaseUrl(imagem.caminho)) {
+if (!_storageService.isRemoteUrl(imagem.caminho)) {
       final urlPublica = await _storageService.uploadImagem(imagem.caminho);
       if (urlPublica != null) {
         caminhoFinal = urlPublica;
@@ -2342,7 +2324,7 @@ Future<void> validarFilaOffline() async {
       String caminhoFinal = caminhoLocal;
       
       // Upload apenas se for caminho local
-      if (!_storageService.isSupabaseUrl(caminhoLocal)) {
+ if (!_storageService.isRemoteUrl(caminhoLocal)) {
         try {
           final urlPublica = await _storageService.uploadImagem(caminhoLocal);
           if (urlPublica != null && urlPublica.isNotEmpty) {
@@ -2448,7 +2430,7 @@ Future<void> validarFilaOffline() async {
       if (caminhoLocal == null || caminhoLocal.isEmpty) continue;
       
       String caminhoFinal = caminhoLocal;
-      if (!_storageService.isSupabaseUrl(caminhoLocal)) {
+if (!_storageService.isRemoteUrl(caminhoLocal)) {
         final urlPublica = await _storageService.uploadImagem(caminhoLocal);
         if (urlPublica != null) caminhoFinal = urlPublica;
       }
@@ -4316,7 +4298,7 @@ Future<void> sincronizarImagensProdutos() async {
       final caminhoLocal = row['caminho'] as String;
       
       // Fazer upload para Supabase
-      final publicUrl = await SupabaseStorageService.instance.uploadImagem(caminhoLocal);
+final publicUrl = await CloudinaryStorageService.instance.uploadImagem(caminhoLocal);
       
       if (publicUrl != null) {
         // Atualizar caminho no banco
