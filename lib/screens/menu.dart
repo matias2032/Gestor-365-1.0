@@ -38,7 +38,8 @@ class _MenuScreenState extends State<MenuScreen> with SingleTickerProviderStateM
   final _syncService = SupabaseSyncService.instance;
 
   
-  late Future<List<Produto>> _produtosFuture;
+List<Produto> _produtos = [];
+bool _carregando = true;
   late AnimationController _animationController;
   
   StreamSubscription<void>? _estoqueSubscription;
@@ -70,19 +71,14 @@ class _MenuScreenState extends State<MenuScreen> with SingleTickerProviderStateM
     _animationController.forward();
 
     _sincronizarSeNecessario();
-
-    _produtosFuture = _fetchProdutos();
+    _carregarProdutos();
     _fetchCategorias();
     _atualizarContadorPedidos();
     
     // Escutar mudanças no estoque
-    _estoqueSubscription = _dbService.estoqueStream.listen((_) {
-      if (mounted) {
-        setState(() {
-          _produtosFuture = _fetchProdutos();
-        });
-      }
-    });
+  _estoqueSubscription = _dbService.estoqueStream.listen((_) {
+  // ignorar — já tratado pelo SyncEventsService
+});
     
     // 🔥 NOVO: Escutar mudanças no contador global
     _contadorPedidos = _contadorService.contadorAtual;
@@ -94,42 +90,45 @@ class _MenuScreenState extends State<MenuScreen> with SingleTickerProviderStateM
       }
     });
 
- _syncEventsSubscription = SyncEventsService.instance.eventStream.listen(
-    (event) {
-      if (!mounted) return;
-      
-      switch (event.tipo) {
-        case SyncEventType.produtoAlterado:
-        case SyncEventType.categoriaAlterada:
-        case SyncEventType.estoqueAlterado:
-          print('📲 Recarregando produtos devido a ${event.tipo}');
-          setState(() {
-            _produtosFuture = _fetchProdutos();
-          });
-          break;
-          
-        case SyncEventType.pedidoAlterado:
-          print('📲 Atualizando contador de pedidos');
-          _atualizarContadorPedidos();
-          break;
-          
-        case SyncEventType.syncCompleta:
-          print('📲 Sincronização completa - recarregando tudo');
-          _fetchCategorias();
-          setState(() {
-            _produtosFuture = _fetchProdutos();
-          });
-          _atualizarContadorPedidos();
-          break;
-          
-        default:
-          break;
-      }
-    },
-    onError: (error) {
-      print('Erro no listener: $error');
-    },
-  );
+ _syncEventsSubscription = SyncEventsService.instance.eventStream.listen((event) {
+  if (!mounted) return;
+
+  switch (event.tipo) {
+    
+    case SyncEventType.produtoAlterado:
+    case SyncEventType.estoqueAlterado:
+      // Atualização cirúrgica — só o produto afetado
+      event.idEntidade != null
+          ? _atualizarProduto(event.idEntidade!)
+          : _carregarProdutos();
+      break;
+
+    case SyncEventType.categoriaAlterada:
+      // Categorias mudaram:
+      // 1. Atualizar lista do painel de filtros
+      _fetchCategorias();
+      // 2. Recarregar produtos (eles carregam as suas categorias embutidas)
+      _carregarProdutos();
+      break;
+
+    case SyncEventType.pedidoAlterado:
+      _atualizarContadorPedidos();
+      break;
+
+    case SyncEventType.syncCompleta:
+      _fetchCategorias(); // atualiza filtros
+      _carregarProdutos(); // traz tudo atualizado
+      _atualizarContadorPedidos();
+      break;
+
+    default:
+      break;
+  }
+},
+onError: (error) {
+  print('Erro no listener: $error');
+},
+);
 }
   @override
   void dispose() {
@@ -184,45 +183,59 @@ Future<void> _sincronizarSeNecessario() async {
 }
 
 
-Future<List<Produto>> _fetchProdutos() async {
+Future<void> _carregarProdutos() async {
   try {
-    final produtos = await _dbService.readAllProdutosWithAssoc();
-    
-    // Aplicar filtros
-    final produtosFiltrados = produtos.where((p) {
-      if (p.ativo != 1) return false;
-      if (ValidadeAlertaService.estaExpirado(p.dataExpiracao)) return false;
-      
-      if (_buscaNome.isNotEmpty && 
-          !p.nome.toLowerCase().contains(_buscaNome.toLowerCase())) {
-        return false;
-      }
-      
-      if (_precoMin != null && p.preco < _precoMin!) return false;
-      if (_precoMax != null && p.preco > _precoMax!) return false;
-      
-      if (_categoriaSelecionada != null) {
-        final temCategoria = p.categoriasAssociadas?.any(
-          (c) => c.id == _categoriaSelecionada
-        ) ?? false;
-        if (!temCategoria) return false;
-      }
-      
-      return true;
-    }).toList();
-    
-    // 🔥 NOVO: Ordenar por estoque (produtos com estoque baixo primeiro)
-    produtosFiltrados.sort((a, b) {
-  final scoreA = _calcularScore(a);
-  final scoreB = _calcularScore(b);
-  return scoreB.compareTo(scoreA); // Maior score primeiro
-});
-    
-    return produtosFiltrados;
+    final lista = await _dbService.readAllProdutosWithAssoc();
+    if (!mounted) return;
+    setState(() {
+      _produtos = _filtrarEOrdenar(lista);
+      _carregando = false;
+    });
   } catch (e) {
-    print('Erro ao buscar produtos: $e');
-    return [];
+    print('Erro ao carregar produtos: $e');
+    if (mounted) setState(() => _carregando = false);
   }
+}
+
+Future<void> _atualizarProduto(int idProduto) async {
+  try {
+    final atualizado = await _syncService.readProdutoWithDetailsById(idProduto);
+    if (!mounted) return;
+    setState(() {
+      if (atualizado == null || atualizado.ativo != 1) {
+        _produtos.removeWhere((p) => p.id == idProduto);
+      } else {
+        final i = _produtos.indexWhere((p) => p.id == idProduto);
+        if (i >= 0) {
+          _produtos[i] = atualizado;
+        } else {
+          _produtos.insert(0, atualizado);
+        }
+      }
+      _produtos = _filtrarEOrdenar(_produtos);
+    });
+  } catch (e) {
+    print('Erro ao atualizar produto $idProduto: $e');
+  }
+}
+
+List<Produto> _filtrarEOrdenar(List<Produto> lista) {
+  final filtrados = lista.where((p) {
+    if (p.ativo != 1) return false;
+    if (ValidadeAlertaService.estaExpirado(p.dataExpiracao)) return false;
+    if (_buscaNome.isNotEmpty &&
+        !p.nome.toLowerCase().contains(_buscaNome.toLowerCase())) return false;
+    if (_precoMin != null && p.preco < _precoMin!) return false;
+    if (_precoMax != null && p.preco > _precoMax!) return false;
+    if (_categoriaSelecionada != null) {
+      final tem = p.categoriasAssociadas?.any((c) => c.id == _categoriaSelecionada) ?? false;
+      if (!tem) return false;
+    }
+    return true;
+  }).toList();
+
+  filtrados.sort((a, b) => _calcularScore(b).compareTo(_calcularScore(a)));
+  return filtrados;
 }
 
 int _calcularScore(Produto p) {
@@ -249,28 +262,27 @@ int _calcularScore(Produto p) {
     }
   }
 
-  void _aplicarFiltros() {
-    setState(() {
-      _buscaNome = _nomeController.text.trim();
-      _precoMin = double.tryParse(_precoMinController.text);
-      _precoMax = double.tryParse(_precoMaxController.text);
-      _produtosFuture = _fetchProdutos();
-    });
-  }
+void _aplicarFiltros() {
+  setState(() {
+    _buscaNome = _nomeController.text.trim();
+    _precoMin = double.tryParse(_precoMinController.text);
+    _precoMax = double.tryParse(_precoMaxController.text);
+    _produtos = _filtrarEOrdenar(_produtos);
+  });
+}
 
-  void _limparFiltros() {
-    setState(() {
-      _nomeController.clear();
-      _precoMinController.clear();
-      _precoMaxController.clear();
-      _categoriaSelecionada = null;
-      _buscaNome = '';
-      _precoMin = null;
-      _precoMax = null;
-      _produtosFuture = _fetchProdutos();
-    });
-  }
-
+void _limparFiltros() {
+  setState(() {
+    _nomeController.clear();
+    _precoMinController.clear();
+    _precoMaxController.clear();
+    _categoriaSelecionada = null;
+    _buscaNome = '';
+    _precoMin = null;
+    _precoMax = null;
+    _produtos = _filtrarEOrdenar(_produtos);
+  });
+}
   Future<void> _iniciarNovoPedido() async {
     if (!_pedidoAtivoService.temPedidoAtivo) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -377,7 +389,7 @@ int _calcularScore(Produto p) {
             arguments: produto.id,
           );
           setState(() {
-            _produtosFuture = _fetchProdutos();
+_carregarProdutos();
           });
           _atualizarContadorPedidos();
         },
@@ -790,67 +802,34 @@ Widget build(BuildContext context) {
                   : const SizedBox.shrink(),
             ),
             Expanded(
-              child: FutureBuilder<List<Produto>>(
-                future: _produtosFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.error_outline,
-                              size: 60, color: Colors.red.shade300),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Erro ao carregar produtos',
-                            style: TextStyle(color: Colors.grey.shade600),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  final produtos = snapshot.data ?? [];
-
-                  if (produtos.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.inventory_2_outlined,
-                            size: 100,
-                            color: Colors.grey.shade300,
-                          ),
-                          const SizedBox(height: 20),
-                          const Text(
-                            'Nenhum produto encontrado',
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return GridView.builder(
-                    padding: const EdgeInsets.all(16),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 230,
-                      mainAxisSpacing: 16,
-                      crossAxisSpacing: 16,
-                      mainAxisExtent: 275,
-                    ),
-                    itemCount: produtos.length,
-                    itemBuilder: (context, index) =>
-                        _buildProdutoCard(produtos[index], index),
-                  );
-                },
-              ),
+              child: _carregando
+    ? const Center(child: CircularProgressIndicator())
+    : _produtos.isEmpty
+        ? Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.inventory_2_outlined,
+                    size: 100, color: Colors.grey.shade300),
+                const SizedBox(height: 20),
+                const Text('Nenhum produto encontrado',
+                    style: TextStyle(fontSize: 16, color: Colors.grey)),
+              ],
+            ),
+          )
+        : GridView.builder(
+            padding: const EdgeInsets.all(16),
+            gridDelegate:
+                const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 230,
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 16,
+              mainAxisExtent: 275,
+            ),
+            itemCount: _produtos.length,
+            itemBuilder: (context, index) =>
+                _buildProdutoCard(_produtos[index], index),
+          )
             ),
           ],
         ),

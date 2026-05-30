@@ -14,6 +14,7 @@ import 'package:collection/collection.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/persistencia_ficheiro.dart';
 import '../services/supabase_sync_service.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 
 class EditarProdutoScreen extends StatefulWidget {
   final int produtoId;
@@ -163,12 +164,16 @@ class _EditarProdutoScreenState extends State<EditarProdutoScreen> {
     }
   }
   
-  Future<String?> _pickFileReal() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.image, 
-        allowMultiple: false, 
-      );
+Future<String?> _pickFileReal() async {
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: [
+        'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp',
+        'jfif', 'jif', 'tiff', 'tif', 'ico', 'svg', 'heic', 'heif', 'avif',
+      ],
+      allowMultiple: false,
+    );
 
       if (result != null && result.files.isNotEmpty) {
         final path = result.files.single.path;
@@ -302,56 +307,111 @@ class _EditarProdutoScreenState extends State<EditarProdutoScreen> {
     }
   }
 
-  Widget _buildImageField(TextEditingController controller, int index) {
-    final caminho = controller.text;
-    final isPrincipal = (index == 0) && caminho.isNotEmpty; 
+Widget _buildImageField(TextEditingController controller, int index) {
+  final isPrincipal = (index == 0) && controller.text.isNotEmpty;
+  bool _isDragOver = false;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: TextFormField(
-              controller: controller,
-              readOnly: true,
-              enabled: _campoHabilitado(), // 🔥 NOVO
-              decoration: InputDecoration(
-                labelText: isPrincipal ? 'Caminho Imagem Principal' : 'Caminho Imagem Adicional ${index + 1}',
-                hintText: 'Clique para selecionar o arquivo...',
-                border: const OutlineInputBorder(),
-                disabledBorder: OutlineInputBorder( // 🔥 NOVO
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
+  return StatefulBuilder(
+    builder: (context, setLocalState) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12.0),
+        child: DropTarget(
+          onDragEntered: (_) {
+            if (_campoHabilitado()) setLocalState(() => _isDragOver = true);
+          },
+          onDragExited: (_) => setLocalState(() => _isDragOver = false),
+          onDragDone: (details) {
+            if (!_campoHabilitado()) return;
+
+            final arquivosImagem = details.files.where((f) {
+              final ext = f.path.split('.').last.toLowerCase();
+              return [
+                'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp',
+                'jfif', 'jif', 'tiff', 'tif', 'ico', 'heic', 'heif', 'avif',
+              ].contains(ext);
+            }).toList();
+
+            setLocalState(() => _isDragOver = false);
+
+            if (arquivosImagem.isNotEmpty) {
+              setState(() {
+                controller.text = arquivosImagem.first.path;
+                if (index == _imagemControllers.length - 1) {
+                  _imagemControllers.add(TextEditingController());
+                }
+              });
+            } else {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Ficheiro não suportado. Use imagens (jpg, png, webp, etc.)')),
+                );
+              }
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _isDragOver ? Colors.deepOrange : Colors.transparent,
+                width: 2,
               ),
-              onChanged: (value) {
-                setState(() {}); 
-              },
+              color: _isDragOver ? Colors.deepOrange.shade50 : Colors.transparent,
             ),
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.folder_open, 
-              color: _campoHabilitado() ? Colors.blue : Colors.grey, // 🔥 NOVO
-            ),
-            onPressed: _campoHabilitado() // 🔥 NOVO
-                ? () async {
-                    final path = await _pickFileReal();
-                    if (path != null) {
-                      setState(() {
-                        controller.text = path;
-                        if (index == _imagemControllers.length - 1) {
-                          _imagemControllers.add(TextEditingController());
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: controller,
+                    readOnly: true,
+                    enabled: _campoHabilitado(),
+                    decoration: InputDecoration(
+                      labelText: isPrincipal
+                          ? 'Imagem Principal'
+                          : 'Imagem Adicional ${index + 1}',
+                      hintText: 'Clique na pasta ou arraste um ficheiro aqui...',
+                      border: const OutlineInputBorder(),
+                      disabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.folder_open,
+                    color: _campoHabilitado() ? Colors.blue : Colors.grey,
+                  ),
+                  tooltip: 'Selecionar ficheiro',
+                  onPressed: _campoHabilitado()
+                      ? () async {
+                          final path = await _pickFileReal();
+                          if (path != null) {
+                            setState(() {
+                              controller.text = path;
+                              if (index == _imagemControllers.length - 1) {
+                                _imagemControllers.add(TextEditingController());
+                              }
+                            });
+                          }
                         }
-                      });
-                    }
-                  }
-                : null,
+                      : null,
+                ),
+                if (controller.text.isNotEmpty && _campoHabilitado())
+                  IconButton(
+                    icon: const Icon(Icons.clear, color: Colors.red),
+                    tooltip: 'Remover imagem',
+                    onPressed: () => setState(() => controller.clear()),
+                  ),
+              ],
+            ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   @override
   Widget build(BuildContext context) {

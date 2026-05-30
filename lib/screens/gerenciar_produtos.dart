@@ -27,8 +27,10 @@ class _GerenciarProdutosScreenState extends State<GerenciarProdutosScreen> {
    StreamSubscription<SyncEvent>? _syncEventsSubscription;
   final SupabaseSyncService _syncService = SupabaseSyncService.instance;
   final DatabaseService _dbService = DatabaseService.instance;
-  late Future<List<Produto>> _produtosFuture;
-  
+  List<Produto> _produtos = [];
+List<Produto> _produtosFiltrados = [];
+bool _carregando = true;
+
   // Perfil do usuário
   int? _perfilUsuario;
 
@@ -50,38 +52,37 @@ class _GerenciarProdutosScreenState extends State<GerenciarProdutosScreen> {
   void initState() {
     super.initState();
     _perfilUsuario = SessaoService.instance.usuarioAtual?.idPerfil;
-    _produtosFuture = _fetchProdutos();
-    _fetchCategorias();
+        _fetchCategorias();
     EstoqueAlertaService.instance.verificarEstoque();
 
-    _syncEventsSubscription = SyncEventsService.instance.eventStream.listen((event) {
-  if (!mounted) return;
-  
-  switch (event.tipo) {
-    case SyncEventType.produtoAlterado:
-print('📲 Produto alterado: recarregando dados');
-      setState(() {
-        _produtosFuture = _fetchProdutos();
-      });
-      break;  
-   case SyncEventType.categoriaAlterada:
-  print('📲 Categoria alterada: recarregando categorias e produtos');
-  _fetchCategorias(); // 🔥 Chamar FORA do setState (é async)
-  setState(() {
-    _produtosFuture = _fetchProdutos();
-  });
-  break;
+_carregarProdutos();
 
+_syncEventsSubscription = SyncEventsService.instance.eventStream.listen((event) {
+  if (!mounted) return;
+
+  switch (event.tipo) {
+
+    case SyncEventType.produtoAlterado:
     case SyncEventType.estoqueAlterado:
-  setState(() {
-        _produtosFuture = _fetchProdutos();
-      });
+      event.idEntidade != null
+          ? _atualizarProduto(event.idEntidade!)
+          : _carregarProdutos();
       break;
+
+    case SyncEventType.categoriaAlterada:
+      _fetchCategorias(); // atualiza dropdown de filtros
+      _carregarProdutos(); // produtos já trazem categorias embutidas
+      break;
+
+    case SyncEventType.syncCompleta:
+      _fetchCategorias();
+      _carregarProdutos();
+      break;
+
     default:
       break;
   }
 });
-
   }
 
   @override
@@ -116,53 +117,7 @@ print('📲 Produto alterado: recarregando dados');
   return pesoEstoque + pesoValidade;
 }
 
-  Future<List<Produto>> _fetchProdutos() async {
-    try {
-      final produtos = await _syncService.readAllProdutosWithAssoc();
-      
-      // 🔥 APLICAR FILTROS
-      final produtosFiltrados = produtos.where((p) {
-        // Filtro de nome
-        if (_buscaNome.isNotEmpty && 
-            !p.nome.toLowerCase().contains(_buscaNome.toLowerCase())) {
-          return false;
-        }
-        
-        // Filtro de preço
-        if (_precoMin != null && p.preco < _precoMin!) return false;
-        if (_precoMax != null && p.preco > _precoMax!) return false;
-        
-        // Filtro de categoria
-        if (_categoriaSelecionada != null) {
-          final temCategoria = p.categoriasAssociadas?.any(
-            (c) => c.id == _categoriaSelecionada
-          ) ?? false;
-          if (!temCategoria) return false;
-        }
-        
-        // 🔥 NOVO: Filtro de status ativo/inativo
-        if (_statusAtivo != null && p.ativo != _statusAtivo) {
-          return false;
-        }
-        
-        return true;
-      }).toList();
-      
-      // Ordenar por estoque (produtos com estoque baixo primeiro)
-    produtosFiltrados.sort((a, b) {
-  final scoreA = _calcularScore(a);
-  final scoreB = _calcularScore(b);
-  return scoreB.compareTo(scoreA);
-});
-
-
-      
-      return produtosFiltrados;
-    } catch (e) {
-      print('Erro ao buscar produtos: $e');
-      return [];
-    }
-  }
+  
 
   
 
@@ -179,34 +134,85 @@ print('📲 Produto alterado: recarregando dados');
     }
   }
 
-  void _aplicarFiltros() {
-    setState(() {
-      _buscaNome = _nomeController.text.trim();
-      _precoMin = double.tryParse(_precoMinController.text);
-      _precoMax = double.tryParse(_precoMaxController.text);
-      _produtosFuture = _fetchProdutos();
-    });
-  }
+void _aplicarFiltros() {
+  setState(() {
+    _buscaNome = _nomeController.text.trim();
+    _precoMin = double.tryParse(_precoMinController.text);
+    _precoMax = double.tryParse(_precoMaxController.text);
+    _produtosFiltrados = _aplicarFiltrosNaLista(_produtos);
+  });
+}
 
-  void _limparFiltros() {
-    setState(() {
-      _nomeController.clear();
-      _precoMinController.clear();
-      _precoMaxController.clear();
-      _categoriaSelecionada = null;
-      _statusAtivo = null;
-      _buscaNome = '';
-      _precoMin = null;
-      _precoMax = null;
-      _produtosFuture = _fetchProdutos();
-    });
-  }
+void _limparFiltros() {
+  setState(() {
+    _nomeController.clear();
+    _precoMinController.clear();
+    _precoMaxController.clear();
+    _categoriaSelecionada = null;
+    _statusAtivo = null;
+    _buscaNome = '';
+    _precoMin = null;
+    _precoMax = null;
+    _produtosFiltrados = _aplicarFiltrosNaLista(_produtos);
+  });
+}
 
-  void _refreshProducts() {
+void _refreshProducts() => _carregarProdutos();
+
+
+Future<void> _carregarProdutos() async {
+  try {
+    final produtos = await _syncService.readAllProdutosWithAssoc();
+    if (!mounted) return;
     setState(() {
-      _produtosFuture = _fetchProdutos();
+      _produtos = produtos;
+      _produtosFiltrados = _aplicarFiltrosNaLista(produtos);
+      _carregando = false;
     });
+  } catch (e) {
+    if (mounted) setState(() => _carregando = false);
   }
+}
+
+Future<void> _atualizarProduto(int idProduto) async {
+  try {
+    final atualizado = await _syncService.readProdutoWithDetailsById(idProduto);
+    if (!mounted) return;
+    setState(() {
+      if (atualizado == null) {
+        _produtos.removeWhere((p) => p.id == idProduto);
+      } else {
+        final i = _produtos.indexWhere((p) => p.id == idProduto);
+        if (i >= 0) {
+          _produtos[i] = atualizado;
+        } else {
+          _produtos.insert(0, atualizado);
+        }
+      }
+      _produtosFiltrados = _aplicarFiltrosNaLista(_produtos);
+    });
+  } catch (e) {
+    print('Erro ao atualizar produto $idProduto: $e');
+  }
+}
+
+List<Produto> _aplicarFiltrosNaLista(List<Produto> produtos) {
+  final filtrados = produtos.where((p) {
+    if (_buscaNome.isNotEmpty &&
+        !p.nome.toLowerCase().contains(_buscaNome.toLowerCase())) return false;
+    if (_precoMin != null && p.preco < _precoMin!) return false;
+    if (_precoMax != null && p.preco > _precoMax!) return false;
+    if (_categoriaSelecionada != null) {
+      final tem = p.categoriasAssociadas?.any((c) => c.id == _categoriaSelecionada) ?? false;
+      if (!tem) return false;
+    }
+    if (_statusAtivo != null && p.ativo != _statusAtivo) return false;
+    return true;
+  }).toList();
+
+  filtrados.sort((a, b) => _calcularScore(b).compareTo(_calcularScore(a)));
+  return filtrados;
+}
 
   Color _getCorBordaEstoque(int? qtd) {
     if (qtd == null || qtd >= 20) return Colors.transparent;
@@ -558,194 +564,167 @@ print('📲 Produto alterado: recarregando dados');
           
           // Lista de produtos
           Expanded(
-            child: FutureBuilder<List<Produto>>(
-              future: _produtosFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Text('Erro ao carregar produtos: ${snapshot.error}')
-                  );
-                }
+            child: _carregando
+    ? const Center(child: CircularProgressIndicator())
+    : _produtosFiltrados.isEmpty
+        ? const Center(
+            child: Text(
+              'Nenhum produto encontrado.',
+              style: TextStyle(fontSize: 18, color: Colors.grey),
+            ),
+          )
+        : ListView.builder(
+            itemCount: _produtosFiltrados.length,
+         itemBuilder: (context, index) {
+  final produto = _produtosFiltrados[index];
+  final categorias = produto.categoriasAssociadas ?? [];
+  final isAtivo = produto.ativo == 1;
 
-                final produtos = snapshot.data ?? [];
+  final imagemPrincipal = produto.imagens?.firstWhereOrNull(
+    (img) => img.isPrincipal,
+  );
+  final caminhoImagem = imagemPrincipal?.caminho;
 
-                if (produtos.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'Nenhum produto encontrado.',
-                      style: TextStyle(fontSize: 18, color: Colors.grey),
+  return Card(
+    elevation: 4,
+    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(12),
+      side: BorderSide(
+        color: _getCorBordaEstoque(produto.quantidadeEstoque),
+        width: produto.quantidadeEstoque != null &&
+               produto.quantidadeEstoque! < 20 ? 3 : 0,
+      ),
+    ),
+    child: ListTile(
+      leading: SizedBox(
+        width: 60,
+        height: 60,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8.0),
+          child: CachedProdutoImage(
+            imagePath: caminhoImagem,
+            width: 60,
+            height: 60,
+            fit: BoxFit.cover,
+            placeholder: Container(
+              color: Colors.grey.shade200,
+              child: const Center(
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            errorWidget: CircleAvatar(
+              backgroundColor: isAtivo
+                  ? Colors.teal.shade100
+                  : Colors.grey.shade300,
+              child: Text(produto.nome[0]),
+            ),
+          ),
+        ),
+      ),
+      title: Text(
+        produto.nome,
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: isAtivo ? Colors.black : Colors.grey,
+          decoration: isAtivo ? null : TextDecoration.lineThrough,
+        ),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 4),
+          Text('Preço: MZN ${produto.preco.toStringAsFixed(2)}'),
+          if (produto.precoPromocional != null &&
+              produto.categoriasAssociadas?.any(
+                (c) => c.nome == 'Promoções da Semana',
+              ) == true)
+            Text(
+              'Promoção: MZN ${produto.precoPromocional!.toStringAsFixed(2)}',
+              style: const TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          _buildEstoqueIndicator(produto.quantidadeEstoque),
+          _buildValidadeIndicator(produto.dataExpiracao),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6.0,
+            runSpacing: 0,
+            children: [
+              const Text(
+                'Categorias: ',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              if (categorias.isEmpty)
+                const Text(
+                  'Nenhuma',
+                  style: TextStyle(fontStyle: FontStyle.italic),
+                ),
+              ...categorias.map((cat) => Chip(
+                    label: Text(
+                      cat.nome,
+                      style: const TextStyle(fontSize: 12),
                     ),
-                  );
-                }
-
-                return ListView.builder(
-                  itemCount: produtos.length,
-                  itemBuilder: (context, index) {
-                    final produto = produtos[index];
-                    final categorias = produto.categoriasAssociadas ?? [];
-                    final isAtivo = produto.ativo == 1;
-                    
-                    final imagemPrincipal = produto.imagens?.firstWhereOrNull(
-                      (img) => img.isPrincipal
+                    backgroundColor: Colors.teal.shade50,
+                    padding: EdgeInsets.zero,
+                  )),
+            ],
+          ),
+        ],
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Tooltip(
+            message: _podeAlterarStatus()
+                ? (isAtivo ? 'Desativar produto' : 'Ativar produto')
+                : 'Apenas Gerentes e Administradores podem alterar o status',
+            child: Switch(
+              value: isAtivo,
+              activeColor:
+                  _podeAlterarStatus() ? Colors.green : Colors.grey,
+              inactiveThumbColor: Colors.grey,
+              onChanged: _podeAlterarStatus()
+                  ? (valor) async {
+                      await _toggleAtivo(produto.id!, valor);
+                    }
+                  : null,
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(
+              Icons.edit,
+              color: isAtivo ? Colors.blue : Colors.grey,
+            ),
+            tooltip: isAtivo
+                ? 'Editar produto'
+                : 'Ative o produto para editar',
+            onPressed: isAtivo
+                ? () async {
+                    await Navigator.of(context).pushNamed(
+                      '/editar_produto',
+                      arguments: produto.id,
                     );
-                    final caminhoImagem = imagemPrincipal?.caminho;
-
-                    return Card(
-                      elevation: 4,
-                      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(
-                          color: _getCorBordaEstoque(produto.quantidadeEstoque),
-                          width: produto.quantidadeEstoque != null && 
-                                 produto.quantidadeEstoque! < 20 ? 3 : 0,
-                        ),
-                      ),
-                      child: ListTile(
-                        leading: SizedBox(
-                          width: 60,
-                          height: 60,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8.0),
-                            child: CachedProdutoImage(
-                              imagePath: caminhoImagem,
-                              width: 60,
-                              height: 60,
-                              fit: BoxFit.cover,
-                              placeholder: Container(
-                                color: Colors.grey.shade200,
-                                child: const Center(
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                ),
-                              ),
-                              errorWidget: CircleAvatar(
-                                backgroundColor: isAtivo 
-                                  ? Colors.teal.shade100 
-                                  : Colors.grey.shade300,
-                                child: Text(produto.nome[0]),
-                              ),
-                            ),
-                          ),
-                        ),
-                        
-                        title: Text(
-                          produto.nome,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold, 
-                            color: isAtivo ? Colors.black : Colors.grey,
-                            decoration: isAtivo ? null : TextDecoration.lineThrough,
-                          ),
-                        ),
-                        
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text('Preço: MZN ${produto.preco.toStringAsFixed(2)}'),
-                            
-                            if (produto.precoPromocional != null && 
-                                produto.categoriasAssociadas?.any(
-                                  (c) => c.nome == 'Promoções da Semana'
-                                ) == true)
-                              Text(
-                                'Promoção: MZN ${produto.precoPromocional!.toStringAsFixed(2)}', 
-                                style: const TextStyle(
-                                  color: Colors.red, 
-                                  fontWeight: FontWeight.bold
-                                ),
-                              ),
-                            
-                            _buildEstoqueIndicator(produto.quantidadeEstoque),
-                            _buildValidadeIndicator(produto.dataExpiracao),
-                            
-                            const SizedBox(height: 6),
-                            Wrap(
-                              spacing: 6.0,
-                              runSpacing: 0,
-                              children: [
-                                const Text(
-                                  'Categorias: ', 
-                                  style: TextStyle(fontWeight: FontWeight.w500)
-                                ),
-                                if (categorias.isEmpty)
-                                  const Text(
-                                    'Nenhuma', 
-                                    style: TextStyle(fontStyle: FontStyle.italic)
-                                  ),
-                                ...categorias.map((cat) => Chip(
-                                  label: Text(
-                                    cat.nome, 
-                                    style: const TextStyle(fontSize: 12)
-                                  ),
-                                  backgroundColor: Colors.teal.shade50,
-                                  padding: EdgeInsets.zero,
-                                )).toList(),
-                              ],
-                            ),
-                          ],
-                        ),
-                        
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // TOGGLE COM CONTROLE DE PERMISSÃO
-                            Tooltip(
-                              message: _podeAlterarStatus() 
-                                  ? (isAtivo ? 'Desativar produto' : 'Ativar produto')
-                                  : 'Apenas Gerentes e Administradores podem alterar o status',
-                              child: Switch(
-                                value: isAtivo,
-                                activeColor: _podeAlterarStatus() ? Colors.green : Colors.grey,
-                                inactiveThumbColor: Colors.grey,
-                                onChanged: _podeAlterarStatus()
-                                    ? (valor) async {
-                                        await _toggleAtivo(produto.id!, valor);
-                                      }
-                                    : null, // null = desabilitado
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            
-                            // Botão de edição
-                            IconButton(
-                              icon: Icon(
-                                Icons.edit,
-                                color: isAtivo ? Colors.blue : Colors.grey,
-                              ),
-                              tooltip: isAtivo 
-                                ? 'Editar produto' 
-                                : 'Ative o produto para editar',
-                              onPressed: isAtivo
-                                ? () async {
-                                    await Navigator.of(context).pushNamed(
-                                      '/editar_produto', 
-                                      arguments: produto.id,
-                                    );
-                                    _refreshProducts();
-                                  }
-                                : () {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Ative o produto antes de editá-lo'
-                                        ),
-                                        backgroundColor: Colors.orange,
-                                      ),
-                                    );
-                                  },
-                            ),
-                          ],
-                        ),
+                    _refreshProducts();
+                  }
+                : () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Ative o produto antes de editá-lo'),
+                        backgroundColor: Colors.orange,
                       ),
                     );
                   },
-                );
-              },
-            ),
+          ),
+        ],
+      ),
+    ),
+  );
+},
+          )
           ),
         ],
       ),

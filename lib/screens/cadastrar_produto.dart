@@ -13,6 +13,7 @@ import '../services/supabase_sync_service.dart';
 import 'package:collection/collection.dart'; 
 import 'package:file_picker/file_picker.dart';
 import '../services/persistencia_ficheiro.dart'; // Importação do serviço de persistência de ficheiros
+import 'package:desktop_drop/desktop_drop.dart';
 
 class CadastrarProdutoScreen extends StatefulWidget {
   const CadastrarProdutoScreen({super.key});
@@ -114,12 +115,16 @@ class _CadastrarProdutoScreenState extends State<CadastrarProdutoScreen> {
   }
 }
   
-  Future<String?> _pickFileReal() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.image, // Filtrar apenas arquivos de imagem
-        allowMultiple: false, // Permitir apenas uma seleção por vez
-      );
+Future<String?> _pickFileReal() async {
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: [
+        'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp',
+        'jfif', 'jif', 'tiff', 'tif', 'ico', 'svg', 'heic', 'heif', 'avif',
+      ],
+      allowMultiple: false,
+    );
 
       if (result != null && result.files.isNotEmpty) {
         final path = result.files.single.path;
@@ -238,47 +243,93 @@ await ServicoLogs.instance.registrarCadastroProduto(_nomeController.text.trim())
   }
   
   // Widget que contém o campo de texto de caminho do ficheiro e o botão de seleção
-  Widget _buildImageField(TextEditingController controller, int index) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12.0),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextFormField(
-              controller: controller,
-              readOnly: true, // Impedir edição manual
-              decoration: InputDecoration(
-                labelText: index == 0 ? 'Caminho Imagem Principal' : 'Caminho Imagem Adicional ${index + 1}',
-                hintText: 'Clique no ícone de pasta para selecionar...',
-                prefixIcon: const Icon(Icons.image),
-                border: const OutlineInputBorder(),
+Widget _buildImageField(TextEditingController controller, int index) {
+  bool _isDragOver = false;
+
+  return StatefulBuilder(
+    builder: (context, setLocalState) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12.0),
+        child: DropTarget(
+          onDragEntered: (_) => setLocalState(() => _isDragOver = true),
+          onDragExited: (_) => setLocalState(() => _isDragOver = false),
+          onDragDone: (details) {
+            final arquivosImagem = details.files.where((f) {
+              final ext = f.path.split('.').last.toLowerCase();
+              return [
+                'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp',
+                'jfif', 'jif', 'tiff', 'tif', 'ico', 'heic', 'heif', 'avif',
+              ].contains(ext);
+            }).toList();
+
+            if (arquivosImagem.isNotEmpty) {
+              setLocalState(() => _isDragOver = false);
+              setState(() => controller.text = arquivosImagem.first.path);
+            } else {
+              setLocalState(() => _isDragOver = false);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Ficheiro não suportado. Use imagens (jpg, png, webp, etc.)')),
+                );
+              }
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _isDragOver ? Colors.teal : Colors.transparent,
+                width: 2,
               ),
-              validator: (value) {
-                if (index == 0 && (value == null || value.isEmpty)) {
-                  return 'Pelo menos a Imagem Principal é obrigatória.';
-                }
-                return null;
-              },
+              color: _isDragOver ? Colors.teal.shade50 : Colors.transparent,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: controller,
+                    readOnly: true,
+                    decoration: InputDecoration(
+                      labelText: index == 0
+                          ? 'Imagem Principal'
+                          : 'Imagem Adicional ${index + 1}',
+                      hintText: 'Clique na pasta ou arraste um ficheiro aqui...',
+                      prefixIcon: const Icon(Icons.image),
+                      border: const OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (index == 0 && (value == null || value.isEmpty)) {
+                        return 'Pelo menos a Imagem Principal é obrigatória.';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.folder_open, color: Colors.blue),
+                  tooltip: 'Selecionar ficheiro',
+                  onPressed: () async {
+                    final path = await _pickFileReal();
+                    if (path != null) {
+                      setState(() => controller.text = path);
+                    }
+                  },
+                ),
+                if (controller.text.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.clear, color: Colors.red),
+                    tooltip: 'Remover imagem',
+                    onPressed: () => setState(() => controller.clear()),
+                  ),
+              ],
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.folder_open, color: Colors.blue),
-            onPressed: () async {
-              // CHAMA O MÉTODO DE SELEÇÃO
-              final path = await _pickFileReal();
-              if (path != null) {
-                setState(() {
-                  // Salva o caminho temporário no controlador. 
-                  // Ele será processado (movido) durante o _submitForm.
-                  controller.text = path;
-                });
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
 
   @override

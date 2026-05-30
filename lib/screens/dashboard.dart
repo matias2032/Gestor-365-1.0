@@ -26,6 +26,7 @@ class _DashboardVendasScreenState extends State<DashboardVendasScreen> {
   PeriodoFiltro _filtroAtual = PeriodoFiltro.semana;
   bool _isLoading = true;
   int? _perfilUsuario;
+  Timer? _reloadTimer;
 List<Map<String, dynamic>> _desempenhoFuncionarios = [];
 
   // Dados dos gráficos
@@ -36,31 +37,26 @@ List<Map<String, dynamic>> _desempenhoFuncionarios = [];
   List<Map<String, dynamic>> _top5Produtos = [];
   List<Map<String, dynamic>> _produtosNaoVendidos = [];
 
-  @override
+@override
 void initState() {
   super.initState();
   _perfilUsuario = SessaoService.instance.usuarioAtual?.idPerfil;
   _carregarDados();
-  Timer? _reloadTimer;
 
-_syncEventsSubscription = SyncEventsService.instance.eventStream.listen((event) {
-  if (!mounted) return;
-  
-  // 🔥 DEBOUNCE: Aguardar 2 segundos antes de recarregar
-  _reloadTimer?.cancel();
-  _reloadTimer = Timer(const Duration(seconds: 2), () {
-    if (mounted) {
-      _carregarDados();
-    }
+  _syncEventsSubscription = SyncEventsService.instance.eventStream.listen((event) {
+    if (!mounted) return;
+    _reloadTimer?.cancel();
+    _reloadTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) _carregarDados();
+    });
   });
-});
+}
 
 @override
 void dispose() {
-  _reloadTimer?.cancel(); // 🔥 NÃO ESQUECER
+  _reloadTimer?.cancel();
   _syncEventsSubscription?.cancel();
   super.dispose();
-}
 }
 
 Future<void> _carregarDados() async {
