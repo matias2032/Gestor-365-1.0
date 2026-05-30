@@ -1,6 +1,7 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 // Serviços
 import 'services/sessao_service.dart';
@@ -60,6 +61,9 @@ void main() async {
 
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
+
+      await dotenv.load(fileName: '.env');
+  print('✅ .env carregado: cloudName=${dotenv.env['CLOUDINARY_CLOUD_NAME']}');
 
        if (!kIsWeb && (
       defaultTargetPlatform == TargetPlatform.windows ||

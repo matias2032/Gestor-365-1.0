@@ -850,28 +850,27 @@ Future<int> createProduto(
       // ✅ VALIDAR IMAGENS ANTES DO UPLOAD
       final imagensComUrl = <ProdutoImagem>[];
       
-      for (final imagem in imagens) {
-        // 🔥 VALIDAÇÃO: Verificar se caminho não é null/vazio
-        if (imagem.caminho.isEmpty) {
-          print('⚠️ Imagem sem caminho - ignorando');
-          continue;
-        }
-        
-        String? caminhoFinal = imagem.caminho;
-        
-if (!_storageService.isRemoteUrl(imagem.caminho)) {
-          final urlPublica = await _storageService.uploadImagem(imagem.caminho);
-          
-          if (urlPublica != null && urlPublica.isNotEmpty) {
-            caminhoFinal = urlPublica;
-            print('✅ Upload: ${imagem.caminho} → $urlPublica');
-          } else {
-            print('⚠️ Falha no upload - usando caminho local');
-          }
-        }
-        
-        imagensComUrl.add(imagem.copyWith(caminho: caminhoFinal));
-      }
+     for (final imagem in imagens) {
+  if (imagem.caminho.isEmpty) continue;
+
+  String caminhoFinal = imagem.caminho;
+
+  if (!_storageService.isRemoteUrl(imagem.caminho)) {
+    final urlPublica = await _storageService.uploadImagem(imagem.caminho);
+    
+    if (urlPublica != null && urlPublica.isNotEmpty) {
+      caminhoFinal = urlPublica;
+    } else {
+      // 🔥 LANÇAR ERRO em vez de continuar com caminho local
+      throw Exception(
+        'Falha no upload da imagem para o Cloudinary. '
+        'Verifique a configuração e a conexão com a internet.'
+      );
+    }
+  }
+
+  imagensComUrl.add(imagem.copyWith(caminho: caminhoFinal));
+}
 
         // 1. Inserir produto no Supabase
         final response = await _supabase.from('produtos').insert({
@@ -901,25 +900,25 @@ if (!_storageService.isRemoteUrl(imagem.caminho)) {
           }
         }
         
-        // 3. Inserir imagens COM URLs DO SUPABASE
-        if (imagensComUrl.isNotEmpty) {
-          for (final imagem in imagensComUrl) {
-            await _supabase.from('produto_imagem').insert({
-              'id_produto': idSupabase,
-              'caminho_imagem': imagem.caminho, // 🔥 AGORA É URL PÚBLICA
-              'legenda': imagem.legenda,
-              'imagem_principal': imagem.isPrincipal ? 1 : 0,
-            });
-          }
-        }
+// 3. Inserir imagens no Supabase COM URLs DO CLOUDINARY
+if (imagensComUrl.isNotEmpty) {
+  for (final imagem in imagensComUrl) {
+    await _supabase.from('produto_imagem').insert({
+      'id_produto': idSupabase,
+      'caminho_imagem': imagem.caminho,       // ← ponto, não []
+      'legenda': imagem.legenda,              // ← ponto, não []
+      'imagem_principal': imagem.isPrincipal ? 1 : 0, // ← propriedade correta
+    });
+  }
+}
         
-        // 4. Criar localmente COM URLS
-        final produtoComId = produto.copyWith(id: idSupabase);
-        await _localDb.createProdutoComIdEspecifico(
-          produtoComId,
-          idsCategorias,
-          imagensComUrl, // 🔥 USA IMAGENS COM URLS
-        );
+  // 4. Criar localmente COM URLS do Cloudinary
+final produtoComId = produto.copyWith(id: idSupabase);
+await _localDb.createProdutoComIdEspecifico(
+  produtoComId,
+  idsCategorias,
+  imagensComUrl,
+);
 
         return idSupabase;
         
@@ -965,18 +964,27 @@ Future<int> updateProduto(
   // Upload de imagens
   final imagensComUrl = <ProdutoImagem>[];
   
-  for (final imagem in imagens) {
-    String? caminhoFinal = imagem.caminho;
+for (final imagem in imagens) {
+  if (imagem.caminho.isEmpty) continue;
+
+  String caminhoFinal = imagem.caminho;
+
+  if (!_storageService.isRemoteUrl(imagem.caminho)) {
+    final urlPublica = await _storageService.uploadImagem(imagem.caminho);
     
-if (!_storageService.isRemoteUrl(imagem.caminho)) {
-      final urlPublica = await _storageService.uploadImagem(imagem.caminho);
-      if (urlPublica != null) {
-        caminhoFinal = urlPublica;
-      }
+    if (urlPublica != null && urlPublica.isNotEmpty) {
+      caminhoFinal = urlPublica;
+    } else {
+      // 🔥 LANÇAR ERRO em vez de continuar com caminho local
+      throw Exception(
+        'Falha no upload da imagem para o Cloudinary. '
+        'Verifique a configuração e a conexão com a internet.'
+      );
     }
-    
-    imagensComUrl.add(imagem.copyWith(caminho: caminhoFinal));
   }
+
+  imagensComUrl.add(imagem.copyWith(caminho: caminhoFinal));
+}
   
   // 1. Atualizar localmente PRIMEIRO
   final result = await _localDb.updateProduto(produto, idsCategorias, imagensComUrl);

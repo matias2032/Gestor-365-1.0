@@ -28,6 +28,11 @@ class CloudinaryStorageService {
 
   /// Faz upload de uma imagem e retorna a URL pública
   Future<String?> uploadImagem(String localPath) async {
+
+      if (!isConfigured) {
+    print('❌ Cloudinary não configurado. Verifique CLOUDINARY_CLOUD_NAME e CLOUDINARY_UPLOAD_PRESET no .env');
+    return null;
+  }
     try {
       final file = File(localPath);
 
