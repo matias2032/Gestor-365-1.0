@@ -200,12 +200,7 @@ if (_temPermissao('/gerenciar_produtos'))
     route: '/configuracoes_impressora',
   ),
 
-                     if (_temPermissao( '/configuracoes_impressora'))
-                  _buildMenuItem(
-                    icon: Icons.print,
-                    title: 'Configurações da Impressora',
-                    route: '/configuracoes_impressora',
-                  ),
+
 
                   //   if (_temPermissao('/corrigir_imagens'))
                   // _buildMenuItem(
