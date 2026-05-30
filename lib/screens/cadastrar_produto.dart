@@ -36,11 +36,9 @@ class _CadastrarProdutoScreenState extends State<CadastrarProdutoScreen> {
   final TextEditingController _dataExpiracaoController = TextEditingController();
 
   // Controladores de Imagem (Simulando 3 slots de upload inicialmente)
-  final List<TextEditingController> _imagemControllers = [
-    TextEditingController(),
-    TextEditingController(),
-    TextEditingController(),
-  ];
+ final List<TextEditingController> _imagemControllers = [
+  TextEditingController(),
+];
 
   // Estado
   bool _ativo = true;
@@ -262,14 +260,20 @@ Widget _buildImageField(TextEditingController controller, int index) {
               ].contains(ext);
             }).toList();
 
+            setLocalState(() => _isDragOver = false);
+
             if (arquivosImagem.isNotEmpty) {
-              setLocalState(() => _isDragOver = false);
-              setState(() => controller.text = arquivosImagem.first.path);
+              setState(() {
+                controller.text = arquivosImagem.first.path;
+                // Adiciona novo slot vazio se este era o último
+                if (index == _imagemControllers.length - 1) {
+                  _imagemControllers.add(TextEditingController());
+                }
+              });
             } else {
-              setLocalState(() => _isDragOver = false);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Ficheiro não suportado. Use imagens (jpg, png, webp, etc.)')),
+                  const SnackBar(content: Text('Ficheiro não suportado.')),
                 );
               }
             }
@@ -292,15 +296,15 @@ Widget _buildImageField(TextEditingController controller, int index) {
                     readOnly: true,
                     decoration: InputDecoration(
                       labelText: index == 0
-                          ? 'Imagem Principal'
+                          ? 'Imagem Principal *'
                           : 'Imagem Adicional ${index + 1}',
-                      hintText: 'Clique na pasta ou arraste um ficheiro aqui...',
+                      hintText: 'Clique na pasta ou arraste aqui...',
                       prefixIcon: const Icon(Icons.image),
                       border: const OutlineInputBorder(),
                     ),
                     validator: (value) {
                       if (index == 0 && (value == null || value.isEmpty)) {
-                        return 'Pelo menos a Imagem Principal é obrigatória.';
+                        return 'A Imagem Principal é obrigatória.';
                       }
                       return null;
                     },
@@ -312,7 +316,13 @@ Widget _buildImageField(TextEditingController controller, int index) {
                   onPressed: () async {
                     final path = await _pickFileReal();
                     if (path != null) {
-                      setState(() => controller.text = path);
+                      setState(() {
+                        controller.text = path;
+                        // Adiciona novo slot vazio se este era o último
+                        if (index == _imagemControllers.length - 1) {
+                          _imagemControllers.add(TextEditingController());
+                        }
+                      });
                     }
                   },
                 ),
@@ -320,7 +330,16 @@ Widget _buildImageField(TextEditingController controller, int index) {
                   IconButton(
                     icon: const Icon(Icons.clear, color: Colors.red),
                     tooltip: 'Remover imagem',
-                    onPressed: () => setState(() => controller.clear()),
+                    onPressed: () {
+                      setState(() {
+                        controller.clear();
+                        // Remove slots extras vazios, mantendo sempre pelo menos 1
+                        _imagemControllers.removeWhere((c) {
+                          return c != _imagemControllers.first &&
+                              c.text.isEmpty;
+                        });
+                      });
+                    },
                   ),
               ],
             ),

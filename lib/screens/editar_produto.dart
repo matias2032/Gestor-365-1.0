@@ -336,6 +336,7 @@ Widget _buildImageField(TextEditingController controller, int index) {
             if (arquivosImagem.isNotEmpty) {
               setState(() {
                 controller.text = arquivosImagem.first.path;
+                // Adiciona novo slot vazio se este era o último
                 if (index == _imagemControllers.length - 1) {
                   _imagemControllers.add(TextEditingController());
                 }
@@ -343,7 +344,7 @@ Widget _buildImageField(TextEditingController controller, int index) {
             } else {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Ficheiro não suportado. Use imagens (jpg, png, webp, etc.)')),
+                  const SnackBar(content: Text('Ficheiro não suportado.')),
                 );
               }
             }
@@ -370,7 +371,7 @@ Widget _buildImageField(TextEditingController controller, int index) {
                       labelText: isPrincipal
                           ? 'Imagem Principal'
                           : 'Imagem Adicional ${index + 1}',
-                      hintText: 'Clique na pasta ou arraste um ficheiro aqui...',
+                      hintText: 'Clique na pasta ou arraste aqui...',
                       border: const OutlineInputBorder(),
                       disabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(color: Colors.grey.shade300),
@@ -390,6 +391,7 @@ Widget _buildImageField(TextEditingController controller, int index) {
                           if (path != null) {
                             setState(() {
                               controller.text = path;
+                              // Adiciona novo slot vazio se este era o último
                               if (index == _imagemControllers.length - 1) {
                                 _imagemControllers.add(TextEditingController());
                               }
@@ -402,7 +404,16 @@ Widget _buildImageField(TextEditingController controller, int index) {
                   IconButton(
                     icon: const Icon(Icons.clear, color: Colors.red),
                     tooltip: 'Remover imagem',
-                    onPressed: () => setState(() => controller.clear()),
+                    onPressed: () {
+                      setState(() {
+                        controller.clear();
+                        // Remove slots extras vazios, mantendo sempre pelo menos 1
+                        _imagemControllers.removeWhere((c) {
+                          return c != _imagemControllers.first &&
+                              c.text.isEmpty;
+                        });
+                      });
+                    },
                   ),
               ],
             ),

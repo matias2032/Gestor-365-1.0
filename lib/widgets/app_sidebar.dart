@@ -7,6 +7,7 @@ import '../services/pedido_contador_service.dart';
 // import '../widgets/theme_toggle_widget.dart';
 import '../services/servico_logs.dart';
 import '../widgets/estoque_badge.dart';
+import 'dart:io';
 
 class AppSidebar extends StatefulWidget {
   final String currentRoute;
@@ -191,13 +192,13 @@ if (_temPermissao('/gerenciar_produtos'))
                   ),
 
                 // 🔥 CONTROLE DE ACESSO: Movimentos de Estoque (Gerente e Admin)
-                if (_temPermissao('/movimentos_estoque'))
-                  _buildMenuItem(
-                    icon: Icons.inventory,
-                    title: 'Movimentos de Estoque',
-                    route: '/movimentos_estoque',
-                  ),
-
+               if (_temPermissao('/configuracoes_impressora') &&
+              (Platform.isWindows || Platform.isMacOS || Platform.isLinux))
+        _buildMenuItem(
+    icon: Icons.print,
+    title: 'Configurações da Impressora',
+    route: '/configuracoes_impressora',
+  ),
 
                      if (_temPermissao( '/configuracoes_impressora'))
                   _buildMenuItem(
